@@ -1,0 +1,493 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <title>Coloreado de Pixel Art</title>
+    <meta http-equiv="content-type" content="text/html;charset=utf-8">
+    <style>
+        /* Estilos generales del cuerpo de la página */
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 20px;
+        }
+        /* Contenedor principal para centrar todo el contenido */
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        /* Contenedor para los botones y la lista de selección */
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        /* Contenedor para la paleta de colores */
+        .palette {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 5px;
+            max-width: 500px;
+        }
+        /* Estilo para cada cuadro de color en la paleta */
+        .color-box {
+            width: 40px;
+            height: 40px;
+            border: 2px solid #333;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.7);
+        }
+        /* Estilo que se aplica al color que está seleccionado */
+        .color-box.selected {
+            border: 2px solid #ffcc00;
+            box-shadow: 0 0 8px #ffcc00;
+        }
+        /* Estilo general para todos los botones y la lista desplegable */
+        button, select {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover, select:hover {
+            opacity: 0.9;
+        }
+        /* Estilo específico para el botón de solución (sobrescribe el verde) */
+        #solutionButton {
+            background-color: #03A9F4;
+        }
+        /* Contenedor para los mensajes de éxito o error */
+        #message {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2E7D32;
+            height: 25px;
+            margin-top: 10px;
+        }
+        /* Estilo para la caja de instrucciones */
+        .instructions {
+            max-width: 500px;
+            margin: 15px auto;
+            padding: 10px;
+            background-color: #e8f5e9;
+            border-radius: 5px;
+            text-align: left;
+        }
+        /* Contenedor para la selección de plantilla */
+        .template-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        /* Contenedor que agrupa los dos lienzos (el de dibujo y el de números) */
+        .canvas-container {
+            position: relative;
+        }
+        /* El lienzo de los números se superpone al de dibujo */
+        #numberCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none; /* Permite que los clics atraviesen este lienzo y lleguen al de abajo */
+        }
+    </style>
+</head>
+<body>
+    <h2>Coloreado de Pixel Art</h2>
+    <div class="container">
+        <div class="controls">
+            <div class="template-selector">
+                <label for="templateSelect">Selecciona una plantilla:</label>
+                <select id="templateSelect">
+                    <option value="small">Pequeño (8x8)</option>
+                    <option value="kirby">Kirby (13x13)</option>
+                    <option value="pokeball">Pokebola (18x18)</option>
+                    <option value="pickaxe">Pico Minecraft (16x16)</option>
+                </select>
+            </div>
+            <button id="checkButton">Comprobar</button>
+            <button id="resetButton">Reiniciar</button>
+            <button id="solutionButton">Mostrar Solución</button>
+        </div>
+        <div class="palette" id="colorPalette"></div>
+        <div class="canvas-container">
+            <canvas id="webglcanvas"></canvas>
+            <canvas id="numberCanvas"></canvas>
+        </div>
+        <div id="message"></div>
+        <div class="instructions">
+            <p><strong>Instrucciones:</strong></p>
+            <ol>
+                <li>Selecciona una plantilla para colorear.</li>
+                <li>Elige un color de la paleta.</li>
+                <li>Haz clic o arrastra sobre el lienzo para colorear.</li>
+                <li>Para borrar un color, mantén presionada la tecla <b>Shift</b> y haz clic en el píxel.</li>
+                <li>Mantén presionado el botón <b>"Mostrar Solución"</b> para ver la imagen final.</li>
+                <li>Haz clic en "Comprobar" cuando termines tu trabajo.</li>
+            </ol>
+        </div>
+    </div>
+
+    <!--Vertex Shader: Define la posición de los vértices --> 
+    <script id="vs" type="vertex">
+        #version 300 es
+        uniform mat4 uMatrizProyeccion;
+        uniform mat4 uMatrizVista;
+        uniform mat4 uMatrizModelo;
+        layout(location = 0) in vec2 aVertices;
+        void main() {
+            gl_Position = uMatrizProyeccion * uMatrizVista * uMatrizModelo * vec4(aVertices, 0.0, 1.0);
+        }
+    </script>
+    <script id="fs" type="fragment">
+        #version 300 es
+        precision mediump float;
+        uniform vec4 uColor;
+        out vec4 color;
+        void main() {
+            color = uColor;
+        }
+    </script>
+    <script>
+        "use strict";
+        // ===== BASE DE DATOS DE IMÁGENES PIXEL ART =====
+        const TEMPLATES = {
+            'small': {
+                size: 8,
+                rows: [
+                    "00011000",
+                    "00111100",
+                    "01122110",
+                    "11233211",
+                    "11233211",
+                    "01122110",
+                    "00111100",
+                    "00011000"
+                ],
+                palette: [null, "#ff0000", "#00ff00", "#0000ff"]
+            },
+            'kirby': {
+                size: 13,
+                rows: [
+                    "0110111110110",
+                    "1221222221221",
+                    "1222222222221",
+                    "1222222121221",
+                    "0122222121210",
+                    "0122222121210",
+                    "0122244222410",
+                    "0012222212210",
+                    "0012222222100",
+                    "0131222222100",
+                    "0133111111000",
+                    "0133101331000",
+                    "0011000110000"
+                ],
+                palette: [null, "#262626", "#F2B3B9", "#D9306E", "#D97398"]
+            },
+            'pokeball': {
+                size: 18,
+                rows: [
+                    "000000111111000000",
+                    "000011222222110000",
+                    "000122222222251000",
+                    "001266222222225100",
+                    "012633622222225510",
+                    "012633622222225510",
+                    "122266222222225551",
+                    "122222222222255551",
+                    "122222222222255551",
+                    "112222222222555551",
+                    "111221112255555511",
+                    "111113331555511111",
+                    "014113331111111410",
+                    "014313331111133410",
+                    "001431113333334100",
+                    "000143333333441000",
+                    "000011444444110000",
+                    "000000111111000000"
+                ],
+                palette: [null, "#0B0C0D", "#BE111B", "#F9F9FB", "#909898", "#A81A18", "#EFD5F2"]
+            },
+            'pickaxe': {
+                size: 13,
+                rows: [
+                    "0000111110000",
+                    "0001234431560",
+                    "0000177744890",
+                    "0000000053470",
+                    "0000000569437",
+                    "0000005890747",
+                    "0000056900747",
+                    "0000589000737",
+                    "0005690000727",
+                    "0058900000070",
+                    "0569000000000",
+                    "5890000000000",
+                    "9900000000000"
+                ], palette: [null, "#0D3E38", "#33EACB", "#2AC6AE", "#28B299", "#493615", "#684D1E", "#0A2520", "#8A6727", "#291E0B"]
+            }
+        };
+
+        // ===== VARIABLES GLOBALES =====
+        let programaID, gl, canvas, numberCanvas, pixelVAO;
+        let currentColor = [0.8, 0.8, 0.8, 1.0]; // Color de pintura inicial del pincel (gris claro)
+        let selectedColorIndex = -1, isMouseDown = false, isViewingSolution = false;
+        let gridSize = 16; // Tamaño de la cuadrícula 
+        let pixelColors = [], targetColors = []; // 'pixelColors' guarda tu progreso, 'targetColors' la solución
+        let currentTemplate = 'small'; // Plantilla inicial
+        /* Variables Uniformes */
+        let uColor, uMatrizProyeccion, uMatrizVista, uMatrizModelo;
+        /* Matrices */
+        let MatrizProyeccion = new Array(16), MatrizVista = new Array(16), MatrizModelo = new Array(16);
+        /***************************************************************************/
+        /* Se crean, compilan y enlazan los programas Shader                       */
+        /***************************************************************************/
+        function compilaEnlazaLosShaders() {
+            /* Se compila el shader de vertice */
+            let vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, document.getElementById("vs").text.trim()); gl.compileShader(vs);
+            /* Se compila el shader de fragmento */
+            let fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, document.getElementById("fs").text.trim()); gl.compileShader(fs);
+            /* Se enlaza ambos shader */
+            programaID = gl.createProgram(); gl.attachShader(programaID, vs); gl.attachShader(programaID, fs); gl.linkProgram(programaID);
+            /* Se instala el programa de shaders para utilizarlo */
+            gl.useProgram(programaID);
+        }
+        function identidad(r) {
+            r[0] = 1; r[4] = 0; r[8] = 0; r[12] = 0;
+            r[1] = 0; r[5] = 1; r[9] = 0; r[13] = 0;
+            r[2] = 0; r[6] = 0; r[10] = 1; r[14] = 0;
+            r[3] = 0; r[7] = 0; r[11] = 0; r[15] = 1;
+        }
+        function traslacion(matriz, tx, ty, tz) {
+            let r = new Array(16);
+            r[0] = 1; r[4] = 0; r[8] = 0; r[12] = tx;
+            r[1] = 0; r[5] = 1; r[9] = 0; r[13] = ty;
+            r[2] = 0; r[6] = 0; r[10] = 1; r[14] = tz;
+            r[3] = 0; r[7] = 0; r[11] = 0; r[15] = 1;
+            multiplica(matriz, matriz, r);
+        }
+        /* Proyección Paralela - glOrtho */
+        function ortho(r, izq, der, abj, arr, cerca, lejos) {
+            r[0] = 2 / (der - izq); r[4] = 0; r[8] = 0; r[12] = -(der + izq) / (der - izq);
+            r[1] = 0; r[5] = 2 / (arr - abj); r[9] = 0; r[13] = -(arr + abj) / (arr - abj);
+            r[2] = 0; r[6] = 0; r[10] = -2 / (lejos - cerca); r[14] = -(lejos + cerca) / (lejos - cerca);
+            r[3] = 0; r[7] = 0; r[11] = 0; r[15] = 1;
+        }
+        /* Multiplicación de matrices de 4 x 4 */
+        function multiplica(c, a, b) {
+            let r = new Array(16);
+            let i, j, k;
+            for (i = 0; i < 4; i++) {
+                for (j = 0; j < 4; j++) {
+                    let s = 0;
+                    for (k = 0; k < 4; k++)
+                        s = s + a[i + k * 4] * b[k + j * 4];
+                    r[i + j * 4] = s;
+                }
+            }
+            for (i = 0; i < 16; i++)
+                c[i] = r[i];
+        }
+
+        // Crea la paleta de colores en HTML basada en la plantilla seleccionada
+        function initColorPalette() {
+            const template = TEMPLATES[currentTemplate];
+            const paletteContainer = document.getElementById('colorPalette');
+            paletteContainer.innerHTML = '';
+            template.palette.forEach((color, index) => {
+                if (index === 0) return;
+                const colorBox = document.createElement('div');
+                colorBox.className = 'color-box';
+                colorBox.style.backgroundColor = color;
+                colorBox.textContent = index;
+                colorBox.dataset.index = index;
+                colorBox.addEventListener('click', () => {
+                    document.querySelector('.color-box.selected')?.classList.remove('selected');
+                    colorBox.classList.add('selected');
+                    selectedColorIndex = index;
+                    const hex = color.replace('#', '');
+                    currentColor = [parseInt(hex.substring(0, 2), 16) / 255, 
+                                    parseInt(hex.substring(2, 4), 16) / 255, 
+                                    parseInt(hex.substring(4, 6), 16) / 255, 
+                                    1.0];
+                });
+                paletteContainer.appendChild(colorBox);
+            });
+        }
+         // Prepara la cuadrícula para una nueva plantilla
+        function initPixelGrid() {
+            const vertices = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+            const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+            pixelVAO = gl.createVertexArray(); gl.bindVertexArray(pixelVAO);
+            let vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+            let ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+            gl.bindVertexArray(null);
+
+            const template = TEMPLATES[currentTemplate];
+            gridSize = template.size;
+            pixelColors = Array.from({ length: gridSize }, () => Array(gridSize).fill([0.8, 0.8, 0.8, 1.0]));
+            targetColors = Array.from({ length: gridSize }, () => Array(gridSize));
+
+            const size = Math.min(500, Math.max(300, gridSize * 25));
+            canvas.width = canvas.height = numberCanvas.width = numberCanvas.height = size;
+            gl.viewport(0, 0, size, size);
+            ortho(MatrizProyeccion, 0, gridSize, 0, gridSize, -5, 5);
+            gl.uniformMatrix4fv(uMatrizProyeccion, false, MatrizProyeccion);
+
+            // Bucle para crear el arreglo 'targetColors'
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    const colorCode = parseInt(template.rows[y][x]);
+                    // Se define el color objetivo basado en el código
+                    let targetColor = [0.8, 0.8, 0.8, 1.0];
+                    if (colorCode > 0 && template.palette[colorCode]) {
+                        const hex = template.palette[colorCode].replace('#', '');
+                        targetColor = [ parseInt(hex.substring(0, 2), 16) / 255,
+                                        parseInt(hex.substring(2, 4), 16) / 255,
+                                        parseInt(hex.substring(4, 6), 16) / 255,
+                                        1.0
+                        ];
+                    }
+
+                    // Se guarda el color en la fila invertida, porque para WebGL Y=0 es abajo.
+                    targetColors[(gridSize - 1) - y][x] = targetColor;
+                }
+            }
+            drawNumbers(); 
+            drawGrid(pixelColors);
+            document.getElementById('message').textContent = '';
+        }
+        // Dibuja los números guía sobre el lienzo
+        function drawNumbers() {
+            const ctx = numberCanvas.getContext('2d');
+            ctx.clearRect(0, 0, numberCanvas.width, numberCanvas.height);
+            const cellSize = numberCanvas.width / gridSize;
+            ctx.font = `${Math.max(10, cellSize / 2)}px Arial`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            const template = TEMPLATES[currentTemplate];
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    const colorCode = parseInt(template.rows[y][x]);
+                    if (colorCode > 0) { ctx.fillText(colorCode, (x + 0.5) * cellSize, (y + 0.5) * cellSize); }
+                }
+            }
+        }
+        // Función para dibujar una cuadrícula en el lienzo WebGL
+        function drawGrid(colorSource) {
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.bindVertexArray(pixelVAO);
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    identidad(MatrizModelo);
+                    let tempMatriz = new Array(16); identidad(tempMatriz);
+                    traslacion(tempMatriz, x, y, 0);
+                    gl.uniformMatrix4fv(uMatrizModelo, false, tempMatriz);
+                    gl.uniform4fv(uColor, colorSource[y][x]);
+                    gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+                }
+            }
+            gl.bindVertexArray(null);
+        }
+        // Pinta o borra un píxel basado en la interacción del usuario
+        function fillPixel(event) {
+            if (isViewingSolution) return; // Si se muestra la solución, no se puede pintar
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((event.clientX - rect.left) / rect.width * gridSize);
+            const y_browser = Math.floor((event.clientY - rect.top) / rect.height * gridSize);
+            const y = gridSize - 1 - y_browser; // Invierte la Y para pintar en la posición correcta
+
+            if (x < 0 || x >= gridSize || y < 0 || y >= gridSize) return;
+            const colorCode = parseInt(TEMPLATES[currentTemplate].rows[y_browser][x]); // Lee el template original
+
+            if (colorCode > 0) {    // Solo se puede pintar en píxeles que no son '0'
+                if (event.shiftKey) {   // Si se presiona Shift, se borra (pinta de gris)
+                    pixelColors[y][x] = [0.8, 0.8, 0.8, 1.0];
+                } else if (selectedColorIndex > 0) {    // Si hay un color seleccionado, se pinta
+                    pixelColors[y][x] = currentColor;
+                }
+                drawGrid(pixelColors);
+            }
+        }
+        // Compara el progreso del usuario con la solución
+        function checkColors() {
+            let allCorrect = true;
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    const c = pixelColors[y][x], t = targetColors[y][x];
+                    if (Math.abs(c[0] - t[0]) > 0.01 || Math.abs(c[1] - t[1]) > 0.01 || Math.abs(c[2] - t[2]) > 0.01) {
+                        allCorrect = false; break;
+                    }
+                }
+                if (!allCorrect) break;
+            }
+            const message = document.getElementById('message');
+            message.textContent = allCorrect ? '¡Felicidades! ¡Todos los colores son correctos!' : 'Algunos colores no son correctos. ¡Sigue intentando!';
+            message.style.color = allCorrect ? '#4CAF50' : '#F44336';
+        }
+        // Muestra la solución 
+        function showSolution() {
+            isViewingSolution = true;
+            drawGrid(targetColors);
+        }
+        // Oculta la solución y restaura el progreso del usuario
+        function hideSolution() {
+            if (isViewingSolution) {
+                isViewingSolution = false;
+                drawGrid(pixelColors);
+            }
+        }
+
+        /***************************************************************************/
+        /* Se prepara el lienzo y se obtiene el contexto del WebGL.                */
+        /***************************************************************************/
+        function main() {
+            canvas = document.getElementById("webglcanvas");
+            gl = canvas.getContext("webgl2");
+            numberCanvas = document.getElementById("numberCanvas");
+            compilaEnlazaLosShaders();
+            uColor = gl.getUniformLocation(programaID, "uColor");
+            uMatrizProyeccion = gl.getUniformLocation(programaID, "uMatrizProyeccion");
+            uMatrizVista = gl.getUniformLocation(programaID, "uMatrizVista");
+            uMatrizModelo = gl.getUniformLocation(programaID, "uMatrizModelo");
+            identidad(MatrizVista);
+            gl.uniformMatrix4fv(uMatrizVista, false, MatrizVista);
+            gl.clearColor(0.9, 0.9, 0.9, 1.0);
+            // --- Asignación de eventos a los elementos HTML ---
+            document.getElementById('templateSelect').addEventListener('change', (e) => { currentTemplate = e.target.value; initPixelGrid(); initColorPalette(); });
+            document.getElementById('checkButton').addEventListener('click', checkColors);
+            document.getElementById('resetButton').addEventListener('click', initPixelGrid);
+
+            const solutionButton = document.getElementById('solutionButton');
+            solutionButton.addEventListener('mousedown', showSolution);
+            solutionButton.addEventListener('mouseup', hideSolution);
+            solutionButton.addEventListener('mouseleave', hideSolution);
+
+            canvas.addEventListener('mousedown', (e) => { isMouseDown = true; fillPixel(e); });
+            canvas.addEventListener('mousemove', (e) => { if (isMouseDown) fillPixel(e); });
+            canvas.addEventListener('mouseup', () => { isMouseDown = false; });
+            // --- Inicialización de la aplicación ---
+            initPixelGrid();
+            initColorPalette();
+        }
+        // Llama a la main cuando la ventana se haya cargado
+        window.onload = main;
+    </script>
+</body>
+</html>
