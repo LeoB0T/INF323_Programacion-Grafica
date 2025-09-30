@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<head>
+    <title>Pac-Man Nivel 1 - Practica 3</title>
+    <style>
+        body { background-color: #000; color: #fff; text-align: center; font-family: 'Press Start 2P', monospace; }
+        canvas { background-color: #000; }
+        #game-info { display: flex; justify-content: space-between; width: 452px; margin: 10px auto; }
+        #message-area { 
+            height: 60px; margin-top: 10px; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+        }
+        #message-text { color: #ff0; }
+        #restart-button {
+            display: none; padding: 10px 20px; margin-top: 5px; font-family: 'Press Start 2P', monospace;
+            font-size: 16px; color: #000; background-color: #ff0; border: 2px solid white; cursor: pointer;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body>
+    <h1>PAC-MAN</h1>
+    <div id="game-info">
+        <h2 id="score">PUNTAJE: 0</h2>
+        <h2 id="lives">VIDAS: 3</h2>
+    </div>
+    <canvas id="webglcanvas" style="border: 2px solid blue;" width="448" height="576"></canvas>
+    <div id="message-area">
+        <p id="message-text">PRESIONA UNA FLECHA PARA COMENZAR</p>
+        <button id="restart-button">Reiniciar Juego</button>
+    </div>
+
+    <script id="vs" type="vertex">
+        #version 300 es
+        uniform mat4 uMatrizProyeccion;
+        uniform mat4 uMatrizVista;
+        uniform mat4 uMatrizModelo;
+        layout(location = 0) in vec2 aVertices;
+        void main() {
+            gl_Position = uMatrizProyeccion * uMatrizVista * uMatrizModelo * vec4(aVertices, 0.0, 1.0);
+        }
+    </script>
+    <script id="fs" type="fragment">
+        #version 300 es
+        precision mediump float;
+        uniform vec4 uColor;
+        out vec4 color;
+        void main() {
+            color = uColor;
+        }
+    </script>
+
+    <script>
+    /* ========================================================================= */
+    /* FUNCIONES DE MATRICES Y UTILIDADES                                       */
+    /* ========================================================================= */
+    /* Convierte de grados a radianes */
+        function toRadians(grados) {
+          return grados * Math.PI / 180;
+        };
+
+        /* Matriz Identidad */
+        function identidad(r) {
+            r[0] = 1; r[4] = 0; r[ 8] = 0; r[12] = 0;
+            r[1] = 0; r[5] = 1; r[ 9] = 0; r[13] = 0;
+            r[2] = 0; r[6] = 0; r[10] = 1; r[14] = 0;
+            r[3] = 0; r[7] = 0; r[11] = 0; r[15] = 1;
+        }
+
+        /* Traslación - glTranslatef */
+        function traslacion(matriz, tx, ty, tz) {
+          let r = new Array(16);
+          r[0] = 1; r[4] = 0; r[ 8] = 0; r[12] = tx;
+          r[1] = 0; r[5] = 1; r[ 9] = 0; r[13] = ty;
+          r[2] = 0; r[6] = 0; r[10] = 1; r[14] = tz;
+          r[3] = 0; r[7] = 0; r[11] = 0; r[15] =  1;
+          multiplica(matriz, matriz, r);
+        }
+
+        /* Escalación - glScalef */
+        function escalacion(matriz, sx, sy, sz) { 
+          let r = new Array(16);
+          r[0] = sx; r[4] =  0; r[ 8] =  0; r[12] =  0;
+          r[1] =  0; r[5] = sy; r[ 9] =  0; r[13] =  0;
+          r[2] =  0; r[6] =  0; r[10] = sz; r[14] =  0;
+          r[3] =  0; r[7] =  0; r[11] =  0; r[15] =  1;
+          multiplica(matriz, matriz, r);
+        }
+	
+        /* Rotación sobre Z - glRotatef */
+        function rotacionZ(matriz, theta){
+          let r = new Array(16);
+          let c = Math.cos(toRadians(theta));
+          let s = Math.sin(toRadians(theta));
+          r[0] =  c; r[4] = -s; r[ 8] =  0; r[12] = 0;
+          r[1] =  s; r[5] =  c; r[ 9] =  0; r[13] = 0;
+          r[2] =  0; r[6] =  0; r[10] =  1; r[14] = 0;
+          r[3] =  0; r[7] =  0; r[11] =  0; r[15] = 1;
+          multiplica(matriz, matriz, r);
+        }
+
+        /* Proyección Paralela - glOrtho */
+        function ortho(r, izq, der, abj, arr, cerca, lejos) {
+            r[0] = 2/(der - izq); r[4] =             0; r[ 8] =                  0; r[12] =         -(der + izq)/(der - izq);
+            r[1] =             0; r[5] = 2/(arr - abj); r[ 9] =                  0; r[13] =         -(arr + abj)/(arr - abj);
+            r[2] =             0; r[6] =             0; r[10] = -2/(lejos - cerca); r[14] = -(lejos + cerca)/(lejos - cerca);
+            r[3] =             0; r[7] =             0; r[11] =                  0; r[15] =                                1;
+        }
+
+        /* Multiplicación de matrices de 4 x 4 */
+        function multiplica(c, a, b) {
+          let r = new Array(16);
+          let i, j, k;
+          for (i = 0; i < 4; i++){
+            for (j = 0; j < 4; j++){
+              let s = 0;
+              for (k = 0; k < 4; k++)
+                s = s + a[i + k * 4] * b[k + j * 4];
+              r[i + j * 4] = s;
+            }
+          }
+          for (i = 0; i < 16; i++)
+            c[i] = r[i];
+        }
+    /* ========================================================================= */
+    /* LÓGICA DEL JUEGO PAC-MAN                                                  */
+    /* ========================================================================= */
+    let gl, uColor, uMatrizProyeccion, uMatrizVista, uMatrizModelo;
+    let MatrizProyeccion = new Array(16), MatrizVista = new Array(16), MatrizModelo = new Array(16);
+    let scoreElement, livesElement, messageTextElement, restartButton;
+    let paredGeo, puntoGeo, powerPillGeo, pacmanGeoAbierto, pacmanGeoCerrado, fantasmaGeo, frutaGeo;
+    let sonidoInicio, sonidoWaka, sonidoMuerte, sonidoFruta, sonidoComeFantasma;
+    const keys = {};
+    let frameCount = 0;
+    
+    let juegoIniciado = false, pacmanMuriendo = false, gameOver = false, nivelCompletado = false;
+    let score = 0, lives = 3, pacdotsComidos = 0, currentLifeDots = 0, totalPacDots = 0, vidaExtraConcedida = false;
+    
+    let modoAsustado = false, temporizadorAsustado = 0, fantasmasComidosEnCombo = 0;
+    let modoGlobalFantasmas = 'scatter', temporizadorModoGlobal = 0, waveCounter = 0;
+    const FPS = 60;
+    const waveTimings = [
+        { mode: 'scatter', duration: 7 * FPS }, { mode: 'chase', duration: 20 * FPS }, { mode: 'scatter', duration: 7 * FPS }, { mode: 'chase', duration: 20 * FPS },
+        { mode: 'scatter', duration: 5 * FPS }, { mode: 'chase', duration: 20 * FPS }, { mode: 'scatter', duration: 5 * FPS }, { mode: 'chase', duration: Infinity }
+    ];
+    let temporizadorNivel = 0;
+    let emergencyTimer = 0;
+
+    let animacionMuerteFrame = 0;
+    
+    const DURACION_ANIMACION_MUERTE_FRAMES = 120; 
+
+    const MAZE_ORIGINAL = [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,2,2,2,2,2,2,2,2,2,2,2,2,1,1,2,2,2,2,2,2,2,2,2,2,2,2,1],
+        [1,3,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,3,1],
+        [1,2,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,2,1],
+        [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+        [1,2,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,2,1],
+        [1,2,2,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,2,2,1],
+        [1,1,1,1,1,1,2,1,1,1,1,1,0,1,1,0,1,1,1,1,1,2,1,1,1,1,1,1],
+        [0,0,0,0,0,1,2,1,1,2,2,2,2,2,2,2,2,2,2,1,1,2,1,0,0,0,0,0],
+        [1,1,1,1,1,1,2,1,1,2,1,1,1,4,4,1,1,1,2,1,1,2,1,1,1,1,1,1],
+        [0,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,1,2,2,2,2,2,2,2,2,2,0],
+        [1,1,1,1,1,1,2,1,1,2,1,0,0,0,0,0,0,1,2,1,1,2,1,1,1,1,1,1],
+        [0,0,0,0,0,1,2,1,1,2,1,0,0,0,0,0,0,1,2,1,1,2,1,0,0,0,0,0],
+        [1,1,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,1,1],
+        [1,2,2,2,2,2,2,2,2,2,2,2,2,1,1,2,2,2,2,2,2,2,2,2,2,2,2,1],
+        [1,3,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,3,1],
+        [1,2,1,1,1,1,2,1,1,1,1,1,2,1,1,2,1,1,1,1,1,2,1,1,1,1,2,1],
+        [1,2,2,2,1,1,2,2,2,2,2,2,2,2,0,2,2,2,2,2,2,2,1,1,2,2,2,1],
+        [1,1,2,2,1,1,2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2,1,1,2,2,1,1],
+        [1,2,2,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,1,1,2,2,2,2,2,2,1],
+        [1,2,1,1,1,1,1,1,1,1,1,1,2,1,1,2,1,1,1,1,1,1,1,1,1,1,2,1],
+        [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+    ];
+    let maze = [];
+    
+    const MAZE_WIDTH = MAZE_ORIGINAL[0].length;
+    const MAZE_HEIGHT = MAZE_ORIGINAL.length;
+    const TILE_SIZE = 1.0;
+    const TUNNEL_Y = 10;
+
+    const MAX_SPEED_PER_FRAME = 0.13;
+    const PACMAN_BASE_SPEED = MAX_SPEED_PER_FRAME * 0.9; 
+    const GHOST_BASE_SPEED = MAX_SPEED_PER_FRAME * 0.75;  
+    
+    let pacman = {};
+    let ghosts = [];
+    const GHOST_TARGETS = {
+        blinky: { x: MAZE_WIDTH - 2, y: 0 }, pinky:  { x: 1, y: 0 },
+        inky:   { x: MAZE_WIDTH - 2, y: MAZE_HEIGHT - 2 }, clyde:  { x: 1, y: MAZE_HEIGHT - 2 }
+    };
+    let fruit = {};
+
+    function crearGeometria(gl, vertices) {
+        const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+        const bufferVertices = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bufferVertices);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gl.bindVertexArray(null); gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        return { vao, count: vertices.length / 2 };
+    }
+
+    function generarVerticesPacman(aperturaBocaGrados) {
+        const numSegments = 30;
+        let vertices = [0, 0];
+        const anguloApertura = toRadians(aperturaBocaGrados);
+        const anguloInicio = anguloApertura / 2;
+        const anguloFin = (Math.PI * 2) - anguloApertura / 2;
+
+        if (aperturaBocaGrados >= 359) return []; 
+
+        for (let i = 0; i <= numSegments; i++) {
+            const t = i / numSegments;
+            const angle = anguloInicio + t * (anguloFin - anguloInicio);
+            vertices.push(0.5 * Math.cos(angle), 0.5 * Math.sin(angle));
+        }
+        return vertices;
+    }
+
+    function isAlignedToGrid(entity) {
+        const tolerance = entity.speed * 0.51;
+        return (Math.abs(entity.x - Math.round(entity.x)) < tolerance) && (Math.abs(entity.y - Math.round(entity.y)) < tolerance);
+    }
+    
+    function getTile(x, y) {
+        const gridX = Math.round(x); const gridY = Math.round(y);
+        if (gridY === TUNNEL_Y && (gridX < 0 || gridX >= MAZE_WIDTH)) { return 2; }
+        if (gridX < 0 || gridX >= MAZE_WIDTH || gridY < 0 || gridY >= MAZE_HEIGHT) return 1;
+        return maze[gridY]?.[gridX] ?? 1;
+    }
+
+    function canMove(entity, x, y, dir) {
+        let nextX = Math.round(x), nextY = Math.round(y);
+        if (dir === 'up') nextY--; if (dir === 'down') nextY++;
+        if (dir === 'left') nextX--; if (dir === 'right') nextX++;
+        const tile = getTile(nextX, nextY);
+        if (tile === 1) return false;
+        if (tile === 4 && entity.type === 'pacman') return false;
+        if (entity.type === 'ghost' && entity.estado !== 'comido' && dir === 'down' && nextY === 9 && (nextX === 13 || nextX === 14)) return false;
+        return true;
+    }
+    
+    function getOppositeDir(dir) {
+        if(dir === 'up') return 'down'; if(dir === 'down') return 'up';
+        if(dir === 'left') return 'right'; if(dir === 'right') return 'left';
+        return 'none';
+    }
+
+    function resetLevel() {
+        pacman = { type: 'pacman', x: 14, y: 17, dir: 'none', desiredDir: 'none', baseSpeed: PACMAN_BASE_SPEED, speed: PACMAN_BASE_SPEED, rot: 90 };
+        ghosts = [
+            { type: 'ghost', name: 'blinky', x: 13.5, y: 9, dir: 'left', baseSpeed: GHOST_BASE_SPEED, speed: GHOST_BASE_SPEED, color: [1,0,0,1], estado: 'persiguiendo' },
+            { type: 'ghost', name: 'pinky',  x: 13.5, y: 11, dir: 'up', baseSpeed: GHOST_BASE_SPEED, speed: GHOST_BASE_SPEED, color: [1,0.7,0.8,1], estado: 'enCasa' },
+            { type: 'ghost', name: 'inky',   x: 11.5, y: 11, dir: 'up', baseSpeed: GHOST_BASE_SPEED, speed: GHOST_BASE_SPEED, color: [0,1,1,1], estado: 'enCasa' },
+            { type: 'ghost', name: 'clyde',  x: 15.5, y: 11, dir: 'up', baseSpeed: GHOST_BASE_SPEED, speed: GHOST_BASE_SPEED, color: [1,0.7,0.2,1], estado: 'enCasa' }
+        ];
+        currentLifeDots = 0;
+        temporizadorNivel = 0;
+        emergencyTimer = 0;
+        waveCounter = 0;
+        temporizadorModoGlobal = waveTimings[0].duration;
+        modoGlobalFantasmas = 'scatter';
+    }
+
+    function checkGhostRelease() {
+        if(juegoIniciado) temporizadorNivel++;
+        ghosts.forEach(ghost => {
+            if (ghost.estado === 'enCasa' && ghost.releaseTimer > 0) {
+                ghost.releaseTimer--;
+                if (ghost.releaseTimer <= 0) ghost.estado = 'saliendo';
+            }
+            if(ghost.estado !== 'enCasa' || ghost.releaseTimer > 0) return;
+            let sale = false;
+            if (lives < 3) {
+                if(ghost.name === 'pinky' && currentLifeDots >= 7) sale = true;
+                if(ghost.name === 'inky' && currentLifeDots >= 17) sale = true;
+                if(ghost.name === 'clyde' && currentLifeDots >= 60) sale = true;
+            } else {
+                if(ghost.name === 'pinky' && temporizadorNivel > 0.5 * FPS) sale = true;
+                if(ghost.name === 'inky' && (temporizadorNivel > 3 * FPS || currentLifeDots >= 5)) sale = true;
+                if(ghost.name === 'clyde' && (temporizadorNivel > 5 * FPS || currentLifeDots >= 15)) sale = true;
+            }
+            if(sale) ghost.estado = 'saliendo';
+        });
+        if (emergencyTimer >= 4 * FPS) {
+            const preference = ['pinky', 'inky', 'clyde'];
+            for (let name of preference) {
+                let g = ghosts.find(g => g.name === name);
+                if (g && g.estado === 'enCasa' && !(g.releaseTimer > 0)) {
+                    g.estado = 'saliendo';
+                    emergencyTimer = 0;
+                    break;
+                }
+            }
+        }
+    }
+
+    function actualizar() {
+        if (!juegoIniciado || gameOver || pacmanMuriendo || nivelCompletado) return;
+        frameCount++;
+        emergencyTimer++;
+        checkGhostRelease();
+
+        if (!modoAsustado) {
+            temporizadorModoGlobal--;
+            if (temporizadorModoGlobal <= 0) {
+                waveCounter = Math.min(waveCounter, waveTimings.length - 1);
+                const currentWave = waveTimings[waveCounter];
+                modoGlobalFantasmas = currentWave.mode;
+                temporizadorModoGlobal = currentWave.duration;
+                waveCounter++;
+                ghosts.forEach(g => { if(g.estado === 'persiguiendo') g.dir = getOppositeDir(g.dir); });
+            }
+        }
+
+        if (modoAsustado) {
+            temporizadorAsustado--;
+            if (temporizadorAsustado <= 0) {
+                modoAsustado = false; fantasmasComidosEnCombo = 0;
+                ghosts.forEach(ghost => { if(ghost.estado === 'asustado') ghost.estado = 'persiguiendo'; });
+            }
+        }
+        
+        pacman.speed = pacman.baseSpeed;
+        
+        if (isAlignedToGrid(pacman)) {
+            pacman.x = Math.round(pacman.x); pacman.y = Math.round(pacman.y);
+            if (pacman.desiredDir !== 'none' && canMove(pacman, pacman.x, pacman.y, pacman.desiredDir)) { pacman.dir = pacman.desiredDir; }
+            if (!canMove(pacman, pacman.x, pacman.y, pacman.dir)) { pacman.dir = 'none'; }
+        }
+        
+        if (pacman.dir !== 'none') {
+            if (pacman.dir === 'up') pacman.y -= pacman.speed; if (pacman.dir === 'down') pacman.y += pacman.speed;
+            if (pacman.dir === 'left') pacman.x -= pacman.speed; if (pacman.dir === 'right') pacman.x += pacman.speed;
+            if (pacman.x < -1) pacman.x = MAZE_WIDTH; if (pacman.x > MAZE_WIDTH) pacman.x = -1;
+            if (pacman.dir === 'up') pacman.rot = 90; if (pacman.dir === 'down') pacman.rot = -90;
+            if (pacman.dir === 'left') pacman.rot = 180; if (pacman.dir === 'right') pacman.rot = 0;
+            
+        }
+
+        ghosts.forEach(ghost => {
+            ghost.speed = ghost.baseSpeed;
+            if (ghost.estado === 'asustado') ghost.speed *= 0.5;
+            if (ghost.estado === 'comido') ghost.speed *= 2.0;
+            
+            let finalTarget = null;
+            
+            switch(ghost.estado) {
+                case 'enCasa': 
+                    if (ghost.y <= 10.5) ghost.dir = 'down'; 
+                    else if (ghost.y >= 11.5) ghost.dir = 'up'; 
+                    break;
+                case 'saliendo': case 'comido':
+                    const targetX = 13.5, targetY = (ghost.estado === 'comido') ? 11 : 8;
+                    let dx = targetX - ghost.x;
+                    let dy = targetY - ghost.y;
+                    if (Math.hypot(dx, dy) < 0.2) {
+                        ghost.x = targetX; ghost.y = targetY;
+                        if(ghost.estado === 'comido') { 
+                            ghost.estado = 'enCasa'; ghost.releaseTimer = 3 * FPS; 
+                        } else { 
+                            ghost.estado = 'persiguiendo'; 
+                            ghost.dir = (ghost.name === 'inky') ? 'right' : 'left';
+                        }
+                    } else {
+                        if (Math.abs(dx) > 0.1) {
+                            let step = Math.min(ghost.speed, Math.abs(dx));
+                            ghost.x += (dx > 0 ? step : -step);
+                            ghost.dir = (dx > 0) ? 'right' : 'left';
+                        } else {
+                            ghost.x = targetX;
+                            let step = Math.min(ghost.speed, Math.abs(dy));
+                            ghost.y += (dy > 0 ? step : -step);
+                            ghost.dir = (dy > 0) ? 'down' : 'up';
+                        }
+                    }
+                    break;
+                default:
+                    if (isAlignedToGrid(ghost)) {
+                        ghost.x = Math.round(ghost.x); ghost.y = Math.round(ghost.y);
+                        const oppositeDir = getOppositeDir(ghost.dir);
+                        let validMoves = ['up', 'down', 'left', 'right'].filter(dir => dir !== oppositeDir && canMove(ghost, ghost.x, ghost.y, dir));
+                        if (validMoves.length === 0) { validMoves = ['up', 'down', 'left', 'right'].filter(dir => canMove(ghost, ghost.x, ghost.y, dir)); }
+                        let bestMove = '', finalTarget = {};
+                        if(ghost.estado === 'asustado') { bestMove = validMoves[Math.floor(Math.random() * validMoves.length)]; } 
+                        else {
+                           if(modoGlobalFantasmas === 'scatter') finalTarget = GHOST_TARGETS[ghost.name]; 
+                           else {
+                                let tx, ty;
+                                if(ghost.name === 'blinky') {
+                                    tx = pacman.x; ty = pacman.y;
+                                } else if(ghost.name === 'pinky') {
+                                    tx = pacman.x; ty = pacman.y;
+                                    const offset = 4;
+                                    if(pacman.dir === 'up') { tx -= offset; ty -= offset; }
+                                    else if(pacman.dir === 'down') { ty += offset; }
+                                    else if(pacman.dir === 'left') { tx -= offset; }
+                                    else if(pacman.dir === 'right') { tx += offset; }
+                                } else if(ghost.name === 'inky') {
+                                    let px = pacman.x, py = pacman.y;
+                                    const offset = 2;
+                                    if(pacman.dir === 'up') { px -= offset; py -= offset; }
+                                    else if(pacman.dir === 'down') { py += offset; }
+                                    else if(pacman.dir === 'left') { px -= offset; }
+                                    else if(pacman.dir === 'right') { px += offset; }
+                                    const blinky = ghosts[0];
+                                    tx = 2 * px - blinky.x;
+                                    ty = 2 * py - blinky.y;
+                                } else if(ghost.name === 'clyde') {
+                                    tx = pacman.x; ty = pacman.y;
+                                    const dist = Math.hypot(ghost.x - tx, ghost.y - ty);
+                                    if(dist <= 8) {
+                                        tx = GHOST_TARGETS[ghost.name].x;
+                                        ty = GHOST_TARGETS[ghost.name].y;
+                                    }
+                                }
+                                finalTarget = {x: tx, y: ty};
+                           }
+                            let minDistance = Infinity;
+                            for(const move of validMoves) {
+                                let nX = ghost.x, nY = ghost.y;
+                                if(move === 'up') nY--; if(move === 'down') nY++; if(move === 'left') nX--; if(move === 'right') nX++;
+                                const dist = Math.hypot(nX - finalTarget.x, nY - finalTarget.y);
+                                if(dist < minDistance) { minDistance = dist; bestMove = move; }
+                            }
+                        }
+                        ghost.dir = bestMove || ghost.dir;
+                    }
+                    break;
+            }
+            if (ghost.estado !== 'saliendo' && ghost.estado !== 'comido') {
+                if (ghost.dir === 'up') ghost.y -= ghost.speed; if (ghost.dir === 'down') ghost.y += ghost.speed;
+                if (ghost.dir === 'left') ghost.x -= ghost.speed; if (ghost.dir === 'right') ghost.x += ghost.speed;
+            }
+            if (ghost.x < -1) ghost.x = MAZE_WIDTH; if (ghost.x > MAZE_WIDTH) ghost.x = -1;
+        });
+
+        const pacGridX = Math.round(pacman.x); const pacGridY = Math.round(pacman.y);
+        const tileComido = maze[pacGridY]?.[pacGridX];
+        if (tileComido === 2 || tileComido === 3) {
+            score += (tileComido === 2) ? 10 : 50; totalPacDots--;
+            if(tileComido === 2) {
+                pacdotsComidos++;
+                currentLifeDots++;
+                emergencyTimer = 0;
+            }
+            maze[pacGridY][pacGridX] = 0; 
+            scoreElement.textContent = "PUNTAJE: " + score;
+            if (score >= 10000 && !vidaExtraConcedida) { lives++; vidaExtraConcedida = true; livesElement.textContent = "VIDAS: " + lives; }
+            if (tileComido === 3) {
+                modoAsustado = true; temporizadorAsustado = 6 * FPS; fantasmasComidosEnCombo = 0;
+                ghosts.forEach(g => { if(g.estado === 'persiguiendo' || g.estado === 'asustado') { g.estado = 'asustado'; g.dir = getOppositeDir(g.dir); } });
+            } else { if (sonidoWaka.paused) sonidoWaka.play(); }
+        } else { if(pacman.dir !== 'none') { sonidoWaka.pause(); sonidoWaka.currentTime = 0; } }
+        
+        if (totalPacDots === 0) {
+            nivelCompletado = true; sonidoWaka.pause();
+            messageTextElement.textContent = "NIVEL COMPLETADO";
+            messageTextElement.style.color = '#0f0';
+            messageTextElement.style.display = 'block'; restartButton.style.display = 'block';
+        }
+        if (pacdotsComidos === 70 && !fruit.eaten) fruit.visible = true;
+        if (fruit.visible && pacGridX === Math.round(fruit.x) && pacGridY === Math.round(fruit.y)) {
+            fruit.visible = false; fruit.eaten = true; score += 100; sonidoFruta.play();
+        }
+
+        ghosts.forEach(ghost => {
+            if (Math.hypot(pacman.x - ghost.x, pacman.y - ghost.y) < 0.7 && !pacmanMuriendo) {
+                if (ghost.estado === 'asustado') {
+                    sonidoComeFantasma.play(); fantasmasComidosEnCombo++;
+                    score += 200 * Math.pow(2, fantasmasComidosEnCombo - 1);
+                    scoreElement.textContent = "PUNTAJE: " + score;
+                    ghost.estado = 'comido';
+                } else if (ghost.estado !== 'enCasa' && ghost.estado !== 'saliendo' && ghost.estado !== 'comido') {
+                    animacionMuerteFrame = 0;
+                    pacmanMuriendo = true;
+                    sonidoWaka.pause(); sonidoMuerte.play();
+                    setTimeout(() => {
+                        lives--; livesElement.textContent = "VIDAS: " + lives;
+                        if (lives > 0) { resetLevel(); pacmanMuriendo = false; }
+                        else {
+                            gameOver = true;
+                            messageTextElement.textContent = "GAME OVER";
+                            messageTextElement.style.color = '#f00';
+                            messageTextElement.style.display = 'block';
+                            restartButton.style.display = 'block';
+                        }
+                    }, 2000); // *** CAMBIO: Ajustado el timeout a 2000ms (2 segundos) ***
+                }
+            }
+        });
+    }
+    
+    function dibujar() {
+        if(juegoIniciado && !pacmanMuriendo) 
+            actualizar();
+
+        gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+        for(let y=0; y < MAZE_HEIGHT; y++){
+            for(let x=0; x < MAZE_WIDTH; x++){
+                const tile = maze[y]?.[x];
+                if(tile === 1) dibujarObjeto(paredGeo, [0.1, 0.2, 1, 1], x, y, 1, 0, 1.05);
+                else if(tile === 2) dibujarObjeto(puntoGeo, [1, 0.8, 0.8, 1], x, y, 0.2);
+                else if(tile === 3) { const pillScale = frameCount % 30 < 15 ? 0.5 : 0.4; dibujarObjeto(powerPillGeo, [1, 1, 1, 1], x, y, pillScale); }
+            }
+        }
+        if(fruit.visible) dibujarObjeto(frutaGeo, [1,0.2,0.2,1], fruit.x, fruit.y, 0.7);
+        ghosts.forEach(ghost => {
+            if (ghost.estado === 'comido') return;
+            let color = ghost.color;
+            if(ghost.estado === 'asustado') {
+                if (temporizadorAsustado < 2.5 * FPS && Math.floor(temporizadorAsustado / (FPS/10)) % 2 === 0) { color = [1, 1, 1, 1]; } 
+                else { color = [0.2, 0.2, 1, 1]; }
+            }
+            dibujarObjeto(fantasmaGeo, color, ghost.x, ghost.y, 0.9);
+        });
+
+        if (!pacmanMuriendo) {
+            const geo = (frameCount % 10 < 5 && pacman.dir !== 'none') ? pacmanGeoAbierto : pacmanGeoCerrado;
+            dibujarObjeto(geo, [1,1,0,1], pacman.x, pacman.y, 0.8, pacman.rot);
+        } else {
+            animacionMuerteFrame++;
+            const progreso = Math.min(animacionMuerteFrame / DURACION_ANIMACION_MUERTE_FRAMES, 1.0);
+            dibujarAnimacionMuerteBoca(progreso);
+        }
+
+        if (juegoIniciado && !gameOver && !nivelCompletado) { 
+            requestAnimationFrame(dibujar); 
+        }
+    }
+    
+    function dibujarObjeto(geometria, color, x, y, escala = 1.0, rotacion = 0, escalaPared = 1.0) {
+        if (!geometria || geometria.count === 0) return; 
+        identidad(MatrizModelo);
+        const offsetX = -MAZE_WIDTH/2 + TILE_SIZE/2; const offsetY = MAZE_HEIGHT/2 - TILE_SIZE/2;
+        traslacion(MatrizModelo, x + offsetX, -y + offsetY, 0);
+        if(rotacion !== 0) rotacionZ(MatrizModelo, rotacion);
+        escalacion(MatrizModelo, escala * escalaPared, escala * escalaPared, 1.0);
+        gl.uniformMatrix4fv(uMatrizModelo, false, MatrizModelo); gl.uniform4fv(uColor, color);
+        gl.bindVertexArray(geometria.vao); gl.drawArrays(gl.TRIANGLE_FAN, 0, geometria.count);
+        gl.bindVertexArray(null);
+    }
+
+    function dibujarAnimacionMuerteBoca(progreso) {
+        const anguloApertura = progreso * 360;
+
+        const verticesMuerte = generarVerticesPacman(anguloApertura);
+        const geoMuerte = crearGeometria(gl, verticesMuerte);
+
+        dibujarObjeto(geoMuerte, [1, 1, 0, 1], pacman.x, pacman.y, 0.8, pacman.rot);
+    }
+
+    function iniciarJuego() {
+        if (juegoIniciado) return;
+        juegoIniciado = true;
+        messageTextElement.style.display = 'none';
+        sonidoInicio.play();
+        sonidoInicio.addEventListener('ended', () => {
+            requestAnimationFrame(dibujar);
+        }, { once: true });
+    }
+
+    function reiniciarJuegoCompleto() {
+        score = 0; lives = 3; pacdotsComidos = 0; currentLifeDots = 0;
+        gameOver = false; juegoIniciado = false; pacmanMuriendo = false; nivelCompletado = false;
+        fruit = {x: 13.5, y: 17, visible: false, eaten: false};
+        modoAsustado = false; temporizadorAsustado = 0; vidaExtraConcedida = false;
+        temporizadorNivel = 0; emergencyTimer = 0; waveCounter = 0; fantasmasComidosEnCombo = 0;
+
+        scoreElement.textContent = "PUNTAJE: 0";
+        livesElement.textContent = "VIDAS: 3";
+        maze = JSON.parse(JSON.stringify(MAZE_ORIGINAL));
+        totalPacDots = MAZE_ORIGINAL.flat().filter(tile => tile === 2 || tile === 3).length;
+        resetLevel();
+
+        restartButton.style.display = 'none';
+        messageTextElement.textContent = "PRESIONA UNA FLECHA PARA COMENZAR";
+        messageTextElement.style.color = '#ff0';
+        messageTextElement.style.display = 'block';
+        dibujar();
+    }
+
+    function main() {
+        const canvas = document.getElementById("webglcanvas");
+        gl = canvas.getContext("webgl2");
+
+        scoreElement = document.getElementById("score"); livesElement = document.getElementById("lives");
+        messageTextElement = document.getElementById("message-text");
+        restartButton = document.getElementById("restart-button");
+
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        // compila shader de vertice
+        let vs = gl.createShader(gl.VERTEX_SHADER); 
+        gl.shaderSource(vs, document.getElementById("vs").text.trim()); 
+        gl.compileShader(vs);
+        // compila shader de fragmento
+        let fs = gl.createShader(gl.FRAGMENT_SHADER); 
+        gl.shaderSource(fs, document.getElementById("fs").text.trim()); 
+        gl.compileShader(fs);
+        // enlazar ambos
+        let prog = gl.createProgram(); 
+        gl.attachShader(prog, vs); 
+        gl.attachShader(prog, fs); 
+        gl.linkProgram(prog); 
+        gl.useProgram(prog);
+
+        uColor = gl.getUniformLocation(prog, "uColor"); 
+        uMatrizProyeccion = gl.getUniformLocation(prog, "uMatrizProyeccion");
+        uMatrizVista = gl.getUniformLocation(prog, "uMatrizVista"); 
+        uMatrizModelo = gl.getUniformLocation(prog, "uMatrizModelo");
+
+        ortho(MatrizProyeccion, -MAZE_WIDTH/2, MAZE_WIDTH/2, -MAZE_HEIGHT/2, MAZE_HEIGHT/2, -1, 1);
+        gl.uniformMatrix4fv(uMatrizProyeccion, false, MatrizProyeccion);
+        
+        identidad(MatrizVista); gl.uniformMatrix4fv(uMatrizVista, false, MatrizVista);
+        const verticesCuadrado = [-0.5,-0.5, 0.5,-0.5, 0.5,0.5, -0.5,0.5];
+        paredGeo = crearGeometria(gl, verticesCuadrado); puntoGeo = crearGeometria(gl, verticesCuadrado);
+        powerPillGeo = crearGeometria(gl, verticesCuadrado);
+        
+        pacmanGeoCerrado = crearGeometria(gl, generarVerticesPacman(2)); // Casi cerrado para que sea un círculo
+        pacmanGeoAbierto = crearGeometria(gl, generarVerticesPacman(60)); // Con la boca abierta
+        
+        const fantasmaVertices = [
+             -0.5, 0,    // Superior Izquierdo
+             -0.5, -0.25,
+             -0.375, -0.5, // Pico 1
+             -0.25, -0.25,
+             0, -0.5,     // Pico 2 (central)
+             0.25, -0.25,
+             0.375, -0.5, // Pico 3
+             0.5, -0.25,
+             0.5, 0,      // Superior Derecho
+        ];
+        // Añadir semicírculo superior
+        for (let i = 15; i >= 0; i--) {
+            const angle = Math.PI - (i / 15) * Math.PI;
+            fantasmaVertices.push(0.5 * Math.cos(angle), 0.5 * Math.sin(angle));
+        }
+        fantasmaGeo = crearGeometria(gl, fantasmaVertices);
+        
+        frutaGeo = crearGeometria(gl, [0,-0.5, 0.4,0, 0,0.5, -0.4,0]);
+        
+        sonidoInicio = new Audio('inicio.wav'); 
+        sonidoWaka = new Audio('waka.wav');
+        sonidoMuerte = new Audio('muerte.wav'); 
+        sonidoFruta = new Audio('fruta.wav');
+        sonidoComeFantasma = new Audio('eat_ghost.wav');
+        sonidoWaka.loop = true;
+
+        window.addEventListener('keydown', (e) => {
+            const dir = e.code.replace('Arrow', '').toLowerCase();
+            if(['up', 'down', 'left', 'right'].includes(dir)) {
+                pacman.desiredDir = dir;
+                iniciarJuego();
+            }
+        });
+        restartButton.addEventListener('click', reiniciarJuegoCompleto);
+
+        reiniciarJuegoCompleto();
+    }
+    window.onload = main;
+    </script>
+</body>
+</html>
